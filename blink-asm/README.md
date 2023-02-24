@@ -1,4 +1,4 @@
-# Blink an LED / AVRA
+# Blink an LED / ASM
 
 Just blinking an LED using an 8-bit AVR microcontroller and assembly!
 
