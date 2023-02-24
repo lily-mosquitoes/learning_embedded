@@ -189,11 +189,12 @@ init_timer:
   clr r16
   clr r17
 
-  ; Output Compare Register A controls the waveform frequency
-  ; FREQ = CLOCK/(2*N*(1+OCR0A))
+  ; Output Compare Register A controls the interrupt frequency
+  ; FREQ = CLOCK/(N*(1+OCR0A))
   ; we have CLOCK = 16 MHz (chip is on an Arduino Uno),
   ; we selected N = 64, so:
-  ; if OCR0A = 249 -> FREQ = 500 Hz i.e. interrups come at 1000 Hz
+  ; if OCR0A = 249 -> FREQ = 1000 Hz
+  ; i.e. interrups come at 1000 per secont
   ldi r16, 249 ; load to r16 the desired value
   out OCR0A, r16 ; write to OCR0A
   clr r16
