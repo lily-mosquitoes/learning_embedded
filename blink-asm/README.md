@@ -42,5 +42,5 @@ then keeps only the Intel hex output, removing the others.
 assuming it is available at `/dev/ttyACM0`.
 
 ## Learning from:
--> https://gist.github.com/mhitza/8a4608f4dfdec20d3879
--> http://www.rjhcoding.com/avr-asm-getting-started-with-avra.php
+- https://gist.github.com/mhitza/8a4608f4dfdec20d3879
+- http://www.rjhcoding.com/avr-asm-getting-started-with-avra.php
