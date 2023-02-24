@@ -1,0 +1,18 @@
+[package]
+name = "blink-rs"
+version = "0.1.0"
+edition = "2021"
+authors = ["Lílian Ferreira de Freitas"]
+
+[dependencies]
+
+[profile.dev]
+panic = "abort"
+lto = true
+opt-level = "s"
+
+[profile.release]
+panic = "abort"
+lto = true
+opt-level = "s"
+codegen-units = 1
