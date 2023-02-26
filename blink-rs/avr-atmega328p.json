@@ -12,7 +12,8 @@
     ]
   },
   "linker": "avr-gcc",
-  "linker-is-gnu": true,
+  "linker-flavor": "gcc",
+  "linker-is-gnu": false,
   "llvm-target": "avr-unknown-unknown",
   "max-atomic-width": 8,
   "no-default-libraries": false,
@@ -23,5 +24,6 @@
     ]
   },
   "target-c-int-width": "16",
-  "target-pointer-width": "16"
+  "target-pointer-width": "16",
+  "target-endian": "little"
 }
