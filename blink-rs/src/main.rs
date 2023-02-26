@@ -9,16 +9,13 @@ fn panic(_info: &PanicInfo) -> ! {
     loop {}
 }
 
-use blink_rs::{
-    init_usart,
-    send_string,
-};
+use blink_rs::USART0;
 
 #[no_mangle]
 pub extern "C" fn main() -> ! {
-    init_usart(9600);
+    let usart0 = USART0::new().initialize();
 
     loop {
-        send_string("It works!!!\r\n");
+        usart0.send_string("Hello there~\r\n")
     }
 }
