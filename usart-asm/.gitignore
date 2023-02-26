@@ -1,0 +1,5 @@
+# build files
+*.hex
+
+# datasheets and manuals
+manuals/
