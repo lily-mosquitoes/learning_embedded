@@ -1,40 +1,59 @@
 #![no_std]
 
-use core::marker::PhantomData;
-
-// definitions for the ATmega328p microprocessor
-// see: https://content.arduino.cc/assets/Atmel-7810-Automotive-Microcontrollers-ATmega328P_Datasheet.pdf?_gl=1*1y8m4t*_ga*NTQ5Mjg5MDUuMTY3NDQxMTg4Mg..*_ga_NEXN8H46L5*MTY3NDQyNDk4NC4zLjEuMTY3NDQyNTUxOS4wLjAuMA..#G1446728
-// USART0 I/O data register
-const UDR0: *mut u8 = 0xC6 as *mut u8;
-// USART0 Baudrate (Scaler) registers
-const UBRR0L: *mut u8 = 0xC4 as *mut u8;
-const UBRR0H: *mut u8 = 0xC5 as *mut u8;
-// USART0 Control and Status Registers C, B and A
-const UCSR0C: *mut u8 = 0xC2 as *mut u8;
-const UCSR0B: *mut u8 = 0xC1 as *mut u8;
-const UCSR0A: *mut u8 = 0xC0 as *mut u8;
+use core::{
+    marker::PhantomData,
+    mem::take,
+};
 
 static CLOCK_HZ: u32 = 16_000_000;
 
-pub struct USART0<State> {
+struct Register {
+    pointer: *mut u8,
+}
+
+impl Register {
+    const fn from(ptr: *mut u8) -> Self {
+        Register { pointer: ptr }
+    }
+}
+
+impl Register {
+    fn read(&self) -> u8 {
+        unsafe { core::ptr::read_volatile(self.pointer) }
+    }
+
+    fn write(&mut self, byte: u8) {
+        unsafe {
+            core::ptr::write_volatile(self.pointer, byte);
+        }
+    }
+}
+
+pub struct USART<USARTState> {
+    udrn: Register,
+    ubrrnl: Register,
+    ubrrnh: Register,
+    ucsrna: Register,
+    ucsrnb: Register,
+    ucsrnc: Register,
     baudrate_scaler: u16,
-    stop_bit_select: StopBit,
-    char_size: CharSize,
+    stop_bit_select: USARTStopBit,
+    char_size: USARTCharSize,
     mode: USARTMode,
-    state: PhantomData<State>,
+    state: PhantomData<USARTState>,
 }
 
 pub struct Unitialized;
 pub struct Initialized;
 #[repr(u8)]
 #[allow(unused)]
-pub enum StopBit {
+pub enum USARTStopBit {
     One = 0,
     Two = 8,
 }
 #[repr(u8)]
 #[allow(unused)]
-pub enum CharSize {
+pub enum USARTCharSize {
     FiveBit = 0,
     SixBit = 2,
     SevenBit = 4,
@@ -49,17 +68,34 @@ pub enum USARTMode {
     TransmitAndReceive = 24,
 }
 
-impl USART0<Unitialized> {
-    pub fn new() -> Self {
-        USART0 {
-            baudrate_scaler: 103,
-            stop_bit_select: StopBit::Two,
-            char_size: CharSize::EightBit,
-            mode: USARTMode::Transmit,
-            state: PhantomData,
-        }
-    }
+pub struct Peripheral<T> {
+    pub p: Option<T>,
+}
 
+impl<T> Peripheral<T> {
+    pub fn take(&mut self) -> T {
+        let p = take(&mut self.p);
+        p.unwrap()
+    }
+}
+
+pub static mut USART0: Peripheral<USART<Unitialized>> = Peripheral {
+    p: Some(USART::<Unitialized> {
+        udrn: Register::from(0xC6 as *mut u8),
+        ubrrnl: Register::from(0xC4 as *mut u8),
+        ubrrnh: Register::from(0xC5 as *mut u8),
+        ucsrna: Register::from(0xC0 as *mut u8),
+        ucsrnb: Register::from(0xC1 as *mut u8),
+        ucsrnc: Register::from(0xC2 as *mut u8),
+        baudrate_scaler: 103,
+        stop_bit_select: USARTStopBit::Two,
+        char_size: USARTCharSize::EightBit,
+        mode: USARTMode::Transmit,
+        state: PhantomData,
+    }),
+};
+
+impl USART<Unitialized> {
     pub fn set_baudrate(mut self, baudrate: u32) -> Self {
         let baudrate_scaler = (CLOCK_HZ / (16 * baudrate)) - 1;
         if (baudrate_scaler > 1_000_000) | (baudrate_scaler < 15) {
@@ -70,12 +106,12 @@ impl USART0<Unitialized> {
         }
     }
 
-    pub fn stop_bit_select(mut self, stop_bit: StopBit) -> Self {
+    pub fn stop_bit_select(mut self, stop_bit: USARTStopBit) -> Self {
         self.stop_bit_select = stop_bit;
         self
     }
 
-    pub fn char_size(mut self, char_size: CharSize) -> Self {
+    pub fn char_size(mut self, char_size: USARTCharSize) -> Self {
         self.char_size = char_size;
         self
     }
@@ -85,25 +121,28 @@ impl USART0<Unitialized> {
         self
     }
 
-    pub fn initialize(self) -> USART0<Initialized> {
+    pub fn initialize(mut self) -> USART<Initialized> {
         let baudrate_scaler = self.baudrate_scaler.to_le_bytes();
         let ucsr0c =
             self.stop_bit_select as u8 + self.char_size as u8;
-        assert_eq!(ucsr0c, 14);
 
-        unsafe {
-            // set baudrate_scaler
-            core::ptr::write_volatile(UBRR0L, baudrate_scaler[0]);
-            core::ptr::write_volatile(UBRR0H, baudrate_scaler[1]);
+        // set baudrate_scaler
+        self.ubrrnl.write(baudrate_scaler[0]);
+        self.ubrrnh.write(baudrate_scaler[1]);
 
-            // set stop_bit_select and char_size
-            core::ptr::write_volatile(UCSR0C, ucsr0c);
+        // set stop_bit_select and char_size
+        self.ucsrnc.write(ucsr0c);
 
-            // set mode (transmit/receive)
-            core::ptr::write_volatile(UCSR0B, self.mode as u8);
-        }
+        // set mode (transmit/receive)
+        self.ucsrnb.write(self.mode as u8);
 
-        USART0::<Initialized> {
+        USART::<Initialized> {
+            udrn: self.udrn,
+            ubrrnl: self.ubrrnl,
+            ubrrnh: self.ubrrnh,
+            ucsrna: self.ucsrna,
+            ucsrnb: self.ucsrnb,
+            ucsrnc: self.ucsrnc,
             baudrate_scaler: self.baudrate_scaler,
             stop_bit_select: self.stop_bit_select,
             char_size: self.char_size,
@@ -113,24 +152,29 @@ impl USART0<Unitialized> {
     }
 }
 
-impl USART0<Initialized> {
-    unsafe fn send_byte(&self, byte: u8) {
+impl USART<Initialized> {
+    fn transmit_byte(&mut self, byte: u8) {
         let test_bit_5 = 0b00010000; // if set we are ready to send
         loop {
-            let ucsr0a = core::ptr::read_volatile(UCSR0A);
+            let ucsr0a = self.ucsrna.read();
             if ucsr0a >= test_bit_5 {
                 break;
             }
         }
 
-        core::ptr::write_volatile(UDR0, byte);
+        self.udrn.write(byte)
     }
 
-    pub fn send_string(&self, string: &str) {
+    pub fn transmit_string(&mut self, string: &str) {
         for byte in string.bytes() {
-            unsafe {
-                self.send_byte(byte);
-            }
+            self.transmit_byte(byte);
         }
+    }
+}
+
+impl core::fmt::Write for USART<Initialized> {
+    fn write_str(&mut self, s: &str) -> core::fmt::Result {
+        self.transmit_string(s);
+        Ok(())
     }
 }

@@ -1,21 +1,21 @@
 #![no_std]
 #![no_main]
-#![feature(asm_experimental_arch)]
-
-use core::panic::PanicInfo;
 
 #[panic_handler]
-fn panic(_info: &PanicInfo) -> ! {
+fn panic(_info: &core::panic::PanicInfo) -> ! {
     loop {}
 }
+
+use core::fmt::Write;
 
 use blink_rs::USART0;
 
 #[no_mangle]
 pub extern "C" fn main() -> ! {
-    let usart0 = USART0::new().initialize();
+    let mut usart0 = unsafe { USART0.take().initialize() };
+    writeln!(usart0, "Hello there~, {}!", "Emilia").unwrap();
 
     loop {
-        usart0.send_string("Hello there~\r\n")
+        // writeln!(usart0, "Hello there~, {}!", "Emilia").unwrap();
     }
 }

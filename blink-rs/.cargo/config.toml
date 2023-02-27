@@ -1,5 +1,8 @@
 [build]
 target = "avr-atmega328p.json"
 
+[target.avr-atmega328p]
+runner = "qemu-system-avr -machine uno -serial stdio -display none -bios"
+
 [unstable]
 build-std = ["core"]
