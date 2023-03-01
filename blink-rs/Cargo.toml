@@ -7,12 +7,12 @@ authors = ["Lílian Ferreira de Freitas"]
 [dependencies]
 
 [profile.dev]
-panic = "abort"
+# panic = "abort"
 lto = true
 opt-level = "s"
 
 [profile.release]
-panic = "abort"
+# panic = "abort"
 lto = true
 opt-level = "s"
 codegen-units = 1

@@ -1,30 +1,118 @@
 #![no_std]
+#![cfg_attr(test, no_main)]
+#![feature(custom_test_frameworks)]
+#![test_runner(crate::test_runner)]
+#![reexport_test_harness_main = "test_main"]
+#![feature(exclusive_wrapper)]
 
+use core::num::NonZeroU32;
+#[cfg(test)]
 use core::{
-    marker::PhantomData,
-    mem::take,
+    fmt::Write,
+    sync::Exclusive,
 };
 
-static CLOCK_HZ: u32 = 16_000_000;
+#[cfg(test)]
+static mut SERIAL: Exclusive<Option<USART<Initialized>>> =
+    Exclusive::new(None);
+
+#[cfg(test)]
+trait Testable {
+    fn run(&self);
+}
+
+#[cfg(test)]
+impl<T: Fn()> Testable for T {
+    fn run(&self) {
+        write!(
+            unsafe { SERIAL.get_mut().as_mut().unwrap() },
+            "{}...\t",
+            core::any::type_name::<T>(),
+        )
+        .unwrap();
+        self();
+        writeln!(
+            unsafe { SERIAL.get_mut().as_mut().unwrap() },
+            "[ok]",
+        )
+        .unwrap();
+    }
+}
+
+#[cfg(test)]
+fn test_runner(tests: &[&dyn Testable]) {
+    unsafe {
+        *SERIAL.get_mut() = Some(USART0.take().initialize());
+    }
+    writeln!(
+        unsafe { SERIAL.get_mut().as_mut().unwrap() },
+        "Running {} tests from lib",
+        tests.len()
+    )
+    .unwrap();
+
+    for test in tests {
+        test.run();
+    }
+}
+
+#[cfg(test)]
+#[panic_handler]
+fn panic(info: &core::panic::PanicInfo) -> ! {
+    writeln!(
+        unsafe { SERIAL.get_mut().as_mut().unwrap() },
+        "[failed]",
+    )
+    .unwrap();
+    writeln!(
+        unsafe { SERIAL.get_mut().as_mut().unwrap() },
+        "Error: {}",
+        info,
+    )
+    .unwrap();
+    loop {}
+}
+
+#[cfg(test)]
+#[no_mangle]
+extern "C" fn main() -> ! {
+    test_main();
+    loop {}
+}
+
+#[cfg(test)]
+pub mod tests {
+    #[test_case]
+    fn passing() {
+        assert_eq!(1, 1);
+    }
+
+    #[test_case]
+    fn failing() {
+        assert_eq!(1, 2);
+    }
+}
+
+use core::marker::PhantomData;
 
 struct Register {
-    pointer: *mut u8,
+    address: u8,
 }
 
 impl Register {
-    const fn from(ptr: *mut u8) -> Self {
-        Register { pointer: ptr }
+    const fn from(address: u8) -> Self {
+        Register { address }
     }
 }
 
 impl Register {
     fn read(&self) -> u8 {
-        unsafe { core::ptr::read_volatile(self.pointer) }
+        unsafe { core::ptr::read_volatile(self.address as *mut u8) }
     }
 
     fn write(&mut self, byte: u8) {
         unsafe {
-            core::ptr::write_volatile(self.pointer, byte);
+            core::ptr::write_volatile(self.address as *mut u8, byte);
         }
     }
 }
@@ -36,6 +124,7 @@ pub struct USART<USARTState> {
     ucsrna: Register,
     ucsrnb: Register,
     ucsrnc: Register,
+    clockrate_hz: u32,
     baudrate_scaler: u16,
     stop_bit_select: USARTStopBit,
     char_size: USARTCharSize,
@@ -69,24 +158,24 @@ pub enum USARTMode {
 }
 
 pub struct Peripheral<T> {
-    pub p: Option<T>,
+    inner: Option<T>,
 }
 
 impl<T> Peripheral<T> {
     pub fn take(&mut self) -> T {
-        let p = take(&mut self.p);
-        p.unwrap()
+        self.inner.take().unwrap()
     }
 }
 
 pub static mut USART0: Peripheral<USART<Unitialized>> = Peripheral {
-    p: Some(USART::<Unitialized> {
-        udrn: Register::from(0xC6 as *mut u8),
-        ubrrnl: Register::from(0xC4 as *mut u8),
-        ubrrnh: Register::from(0xC5 as *mut u8),
-        ucsrna: Register::from(0xC0 as *mut u8),
-        ucsrnb: Register::from(0xC1 as *mut u8),
-        ucsrnc: Register::from(0xC2 as *mut u8),
+    inner: Some(USART::<Unitialized> {
+        udrn: Register::from(0xC6),
+        ubrrnl: Register::from(0xC4),
+        ubrrnh: Register::from(0xC5),
+        ucsrna: Register::from(0xC0),
+        ucsrnb: Register::from(0xC1),
+        ucsrnc: Register::from(0xC2),
+        clockrate_hz: 16_000_000,
         baudrate_scaler: 103,
         stop_bit_select: USARTStopBit::Two,
         char_size: USARTCharSize::EightBit,
@@ -95,14 +184,22 @@ pub static mut USART0: Peripheral<USART<Unitialized>> = Peripheral {
     }),
 };
 
+pub struct IncompatibleSettings;
+
 impl USART<Unitialized> {
-    pub fn set_baudrate(mut self, baudrate: u32) -> Self {
-        let baudrate_scaler = (CLOCK_HZ / (16 * baudrate)) - 1;
-        if (baudrate_scaler > 1_000_000) | (baudrate_scaler < 15) {
-            self
+    pub fn set_clockrate_hz_and_baudrate(
+        mut self,
+        clockrate_hz: NonZeroU32,
+        baudrate: NonZeroU32,
+    ) -> Result<Self, IncompatibleSettings> {
+        let baudrate_scaler =
+            (clockrate_hz.get() / (16 * baudrate.get())) - 1;
+        if baudrate_scaler > 4095 {
+            Err(IncompatibleSettings)
         } else {
+            self.clockrate_hz = clockrate_hz.get();
             self.baudrate_scaler = baudrate_scaler as u16;
-            self
+            Ok(self)
         }
     }
 
@@ -143,6 +240,7 @@ impl USART<Unitialized> {
             ucsrna: self.ucsrna,
             ucsrnb: self.ucsrnb,
             ucsrnc: self.ucsrnc,
+            clockrate_hz: self.clockrate_hz,
             baudrate_scaler: self.baudrate_scaler,
             stop_bit_select: self.stop_bit_select,
             char_size: self.char_size,
@@ -162,7 +260,7 @@ impl USART<Initialized> {
             }
         }
 
-        self.udrn.write(byte)
+        self.udrn.write(byte);
     }
 
     pub fn transmit_string(&mut self, string: &str) {
